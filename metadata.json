@@ -1,0 +1,6 @@
+{
+  "name": "SmartWeather Dashboard",
+  "description": "A modern, mobile-friendly dashboard for monitoring weather and rainfall sensors with real-time simulations and PWA support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
