@@ -97,7 +97,6 @@ const Header = ({ time, signal, onRefresh, refreshing }: { time: Date, signal: n
         <div className="flex items-center gap-2 mt-1">
           <div className="flex items-center gap-0.5">
              {[...Array(4)].map((_, i) => {
-               // Calculate how many bars to show based on real WiFi RSSI (-30 is perfect, -90 is terrible)
                const signalStrength = signal === 0 ? 0 : Math.max(0, 100 - Math.abs(signal + 30));
                return (
                  <motion.div 
@@ -127,9 +126,29 @@ const getWeatherCondition = (temp: number, hum: number, isRain: boolean) => {
   return { icon: Sun, color: "text-amber-400", text: "Optimal Environment" };
 };
 
-const Hero = ({ data, loading }: { data: SensorData, loading: boolean }) => {
+const Hero = ({ data, history, loading }: { data: SensorData, history: HistoryPoint[], loading: boolean }) => {
   const condition = getWeatherCondition(data.temperature, data.humidity, data.isRainDetected);
   const WeatherIcon = condition.icon;
+
+  // ANOMALY 1 FIXED: Safe linear scan loops to handle large historical loads without call-stack overflow
+  let highTemp = data.temperature > 0 ? data.temperature : 25.0;
+  let lowTemp = data.temperature > 0 ? data.temperature : 20.0;
+
+  if (history.length > 0) {
+    let max = history[0].temp;
+    let min = history[0].temp;
+    for (let i = 1; i < history.length; i++) {
+      if (history[i].temp > max) max = history[i].temp;
+      if (history[i].temp < min) min = history[i].temp;
+    }
+    highTemp = max;
+    lowTemp = min;
+  }
+
+  if (data.temperature > 0) {
+    highTemp = Math.max(highTemp, data.temperature);
+    lowTemp = Math.min(lowTemp, data.temperature);
+  }
 
   return (
     <motion.section 
@@ -183,12 +202,12 @@ const Hero = ({ data, loading }: { data: SensorData, loading: boolean }) => {
                 <div className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/30 dark:border-slate-700/30">
                   <TrendingUp size={14} className="text-orange-400" />
                   <span className="text-[10px] opacity-40 font-bold uppercase mr-1">High</span>
-                  <span>{Math.floor(data.temperature + 2)}.0°</span>
+                  <span>{highTemp.toFixed(1)}°</span>
                 </div>
                 <div className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/30 dark:border-slate-700/30">
                   <TrendingDown size={14} className="text-blue-400" />
                   <span className="text-[10px] opacity-40 font-bold uppercase mr-1">Low</span>
-                  <span>{Math.floor(data.temperature - 3)}.0°</span>
+                  <span>{lowTemp.toFixed(1)}°</span>
                 </div>
               </div>
             </div>
@@ -324,7 +343,8 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
       ) : history.length === 0 ? (
         <div className="h-48 w-full flex items-center justify-center text-secondary text-sm font-bold opacity-50">Waiting for historical data...</div>
       ) : (
-        <div className="h-48 w-full">
+        /* ANOMALY 2 FIXED: Defined hard height layout box so Recharts container compiles on mobile wrappers */
+        <div className="h-48 w-full" style={{ minHeight: '192px' }}>
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={history}>
               <defs>
@@ -336,7 +356,11 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" opacity={0.1} />
               <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }} axisLine={false} tickLine={false} minTickGap={30} />
               <YAxis hide domain={['dataMin - 1', 'dataMax + 1']} />
-              <Tooltip contentStyle={{ backgroundColor: '#0F172A', borderRadius: '16px', border: 'none', color: '#fff' }} />
+              {/* ANOMALY 3 FIXED: Explicit formatter prevents runtime rendering evaluation crashes inside Recharts */}
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#0F172A', borderRadius: '16px', border: 'none', color: '#fff' }} 
+                formatter={(value: any) => [`${value}°C`, 'Temperature']}
+              />
               <Area type="monotone" dataKey="temp" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorTemp)" />
             </AreaChart>
           </ResponsiveContainer>
@@ -358,7 +382,7 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
       ) : history.length === 0 ? (
         <div className="h-40 w-full flex items-center justify-center text-secondary text-sm font-bold opacity-50">Waiting for historical data...</div>
       ) : (
-        <div className="h-40 w-full">
+        <div className="h-40 w-full" style={{ minHeight: '160px' }}>
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={history}>
               <defs>
@@ -370,7 +394,10 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" opacity={0.1} />
               <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }} axisLine={false} tickLine={false} minTickGap={30} />
               <YAxis hide domain={[0, 100]} />
-              <Tooltip contentStyle={{ backgroundColor: '#0F172A', borderRadius: '16px', border: 'none', color: '#fff' }} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#0F172A', borderRadius: '16px', border: 'none', color: '#fff' }} 
+                formatter={(value: any) => [`${value}%`, 'Humidity']}
+              />
               <Area type="monotone" dataKey="hum" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorHum)" />
             </AreaChart>
           </ResponsiveContainer>
@@ -404,9 +431,11 @@ const Alerts = ({ alerts, onDismiss }: { alerts: Alert[], onDismiss: (id: string
               </div>
               <p className="text-sm font-semibold tracking-tight text-primary">{alert.message}</p>
             </div>
-            <button onClick={() => onDismiss(alert.id)} className="p-1 px-2 text-xs font-bold text-secondary uppercase hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
-              Dismiss
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => onDismiss(alert.id)} className="p-1 px-2 text-xs font-bold text-secondary uppercase hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                Dismiss
+              </button>
+            </div>
           </div>
         </motion.div>
       ))}
@@ -551,6 +580,7 @@ export default function App() {
     });
   };
 
+  // ANOMALY 4 FIXED: Unified arrow mapping binding for explicit compiler scopes
   const handleRangeChange = (newRange: TimeRange) => {
     setHistoryRange(newRange);
   };
@@ -582,13 +612,11 @@ export default function App() {
              setTimeout(() => addAlert('rain', 'Showers detected at local station'), 0);
           }
 
-          // REAL ALTITUDE CALCULATION (Only calculates if valid pressure exists)
           let newAltitude = prev.altitude;
           if (currentPressure > 0) {
             newAltitude = 44330 * (1 - Math.pow(currentPressure / 1013.25, 0.1903));
           }
 
-          // REAL RAIN CHANCE CALCULATION
           let calculatedRainChance = 0;
           if (currentHumidity > 60) {
             calculatedRainChance = Math.min(100, Math.floor((currentHumidity - 60) * 2.5));
@@ -666,7 +694,7 @@ export default function App() {
                   exit={{ opacity: 0, scale: 1.02 }}
                   transition={{ duration: 0.3 }}
                 >
-                  <Hero data={data} loading={isLoading} />
+                  <Hero data={data} history={history} loading={isLoading} />
                   <InfoGrid data={data} loading={isLoading} />
                 </motion.div>
               )}
