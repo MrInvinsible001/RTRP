@@ -51,6 +51,10 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 
+// --- FIREBASE IMPORTS ---
+import { ref, onValue } from 'firebase/database';
+import { db } from './firebase'; 
+
 // --- Types ---
 
 interface SensorData {
@@ -660,9 +664,9 @@ export default function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   
   const [data, setData] = useState<SensorData>({
-    temperature: 24.5,
-    humidity: 62,
-    pressure: 1012,
+    temperature: 0,
+    humidity: 0,
+    pressure: 0,
     altitude: 124,
     isRainDetected: false,
     lightLevel: 840,
@@ -677,10 +681,10 @@ export default function App() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Data Generation Helper
+  // Data Generation Helper (Keeping this for the fake history graphs until your hardware sends lists)
   const generateHistoricalData = (range: TimeRange): HistoryPoint[] => {
     let points = 0;
-    let increment = 1; // hours
+    let increment = 1; 
     let formatOptions: Intl.DateTimeFormatOptions = {};
 
     if (range === '24h') {
@@ -717,7 +721,7 @@ export default function App() {
     return data;
   };
 
-  // Initial Load Simulation
+  // Initial Load Setting
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsLoading(false);
@@ -751,62 +755,6 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Simulation Logic
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setData(prev => {
-        const drift = Math.sin(Date.now() / 15000) * 0.15;
-        const noise = (Math.random() * 0.1 - 0.05);
-        const newTemp = parseFloat((prev.temperature + drift + noise).toFixed(1));
-        
-        const humNoise = Math.floor(Math.random() * 3 - 1);
-        const newHum = Math.min(100, Math.max(0, prev.humidity + humNoise));
-        
-        const pressNoise = Math.floor(Math.random() * 3 - 1);
-        const newPress = prev.pressure + pressNoise;
-        
-        // Altitude drift (simulated based on pressure fluctuations)
-        const newAltitude = 124 + (1013 - newPress) * 8.5;
-        
-        // Light level drift (LDR 0-1023)
-        const lightNoise = Math.floor(Math.random() * 10 - 5);
-        const newLight = Math.min(1023, Math.max(0, prev.lightLevel + lightNoise));
-        const isDay = newLight > 400;
-
-        // Wifi Signal drift
-        const wifiNoise = Math.floor(Math.random() * 5 - 2);
-        const newWifi = Math.min(-30, Math.max(-95, prev.wifiSignal + wifiNoise));
-
-        // Derived Rain likelihood (Humid + Falling Pressure increases chance)
-        const pressFalling = newPress < prev.pressure;
-        let rainChance = prev.rainLikelihood;
-        if (newHum > 80 && pressFalling) rainChance += 2;
-        else if (newHum < 50) rainChance -= 1;
-        rainChance = Math.min(100, Math.max(0, rainChance));
-        
-        if (rainChance > 85 && prev.rainLikelihood <= 85) {
-          addAlert('warning', 'Atmospheric conditions favor precipitation');
-        }
-        
-        return {
-          ...prev,
-          temperature: newTemp,
-          humidity: newHum,
-          pressure: newPress,
-          altitude: newAltitude,
-          lightLevel: newLight,
-          isDaylight: isDay,
-          wifiSignal: newWifi,
-          rainLikelihood: rainChance,
-          pressureTrend: newPress > prev.pressure ? 'rising' : (newPress < prev.pressure ? 'falling' : 'stable'),
-          lastUpdated: new Date().toLocaleTimeString()
-        };
-      });
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [data.temperature, data.humidity, data.pressure]);
-
   const addAlert = (type: Alert['type'], message: string) => {
     const newAlert = {
       id: Math.random().toString(36).substr(2, 9),
@@ -821,6 +769,43 @@ export default function App() {
   const dismissAlert = (id: string) => {
     setAlerts(prev => prev.filter(a => a.id !== id));
   };
+
+  // --- REAL FIREBASE LISTENER LOGIC ---
+  useEffect(() => {
+    const weatherRef = ref(db, 'weather');
+    
+    const listener = onValue(weatherRef, (snapshot) => {
+      const fbData = snapshot.val();
+      
+      if (fbData) {
+        setData(prev => {
+          const isRaining = fbData.rain === "RAINING";
+          const currentPressure = fbData.pressure !== undefined ? fbData.pressure : prev.pressure;
+          
+          // Trigger the UI alert if it starts raining
+          if (isRaining && !prev.isRainDetected) {
+             setTimeout(() => addAlert('rain', 'Showers detected at local station'), 0);
+          }
+
+          // Calculate altitude based on new pressure (Standard formula estimation)
+          const newAltitude = 44330 * (1 - Math.pow(currentPressure / 1013.25, 0.1903));
+
+          return {
+            ...prev,
+            temperature: fbData.temperature !== undefined ? fbData.temperature : prev.temperature,
+            humidity: fbData.humidity !== undefined ? fbData.humidity : prev.humidity,
+            pressure: currentPressure,
+            altitude: newAltitude || prev.altitude,
+            isRainDetected: isRaining,
+            pressureTrend: currentPressure > prev.pressure ? 'rising' : (currentPressure < prev.pressure ? 'falling' : 'stable'),
+            lastUpdated: new Date().toLocaleTimeString()
+          };
+        });
+      }
+    });
+
+    return () => listener();
+  }, []);
 
   const toggleRain = () => {
     setData(prev => {
