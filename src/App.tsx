@@ -96,17 +96,21 @@ const Header = ({ time, signal, onRefresh, refreshing }: { time: Date, signal: n
         </p>
         <div className="flex items-center gap-2 mt-1">
           <div className="flex items-center gap-0.5">
-             {[...Array(4)].map((_, i) => (
-               <motion.div 
-                key={i} 
-                initial={false}
-                animate={{ opacity: i < (Math.abs(signal) / 25) ? 1 : 0.2 }}
-                className="w-1 h-3 rounded-full bg-emerald-500" 
-               />
-             ))}
+             {[...Array(4)].map((_, i) => {
+               // Calculate how many bars to show based on real WiFi RSSI (-30 is perfect, -90 is terrible)
+               const signalStrength = signal === 0 ? 0 : Math.max(0, 100 - Math.abs(signal + 30));
+               return (
+                 <motion.div 
+                  key={i} 
+                  initial={false}
+                  animate={{ opacity: i < (signalStrength / 25) ? 1 : 0.2 }}
+                  className="w-1 h-3 rounded-full bg-emerald-500" 
+                 />
+               );
+             })}
           </div>
           <span className="text-[10px] font-bold uppercase tracking-wider text-secondary opacity-60">
-            {refreshing ? 'Syncing...' : 'WiFi Connected'}
+            {refreshing ? 'Syncing...' : (signal === 0 ? 'Connecting...' : 'WiFi Connected')}
           </span>
         </div>
       </button>
@@ -577,15 +581,19 @@ export default function App() {
           if (isRaining && !prev.isRainDetected) {
              setTimeout(() => addAlert('rain', 'Showers detected at local station'), 0);
           }
-          const newAltitude = 44330 * (1 - Math.pow(currentPressure / 1013.25, 0.1903));
 
-          // Real math to eliminate the Rain Chance "dummy" value
+          // REAL ALTITUDE CALCULATION (Only calculates if valid pressure exists)
+          let newAltitude = prev.altitude;
+          if (currentPressure > 0) {
+            newAltitude = 44330 * (1 - Math.pow(currentPressure / 1013.25, 0.1903));
+          }
+
+          // REAL RAIN CHANCE CALCULATION
           let calculatedRainChance = 0;
           if (currentHumidity > 60) {
             calculatedRainChance = Math.min(100, Math.floor((currentHumidity - 60) * 2.5));
           }
 
-          // Checks if ESP sends a wifi signal, otherwise keeps previous
           const newWifi = fbData.wifi !== undefined ? fbData.wifi : prev.wifiSignal;
 
           return {
@@ -593,7 +601,7 @@ export default function App() {
             temperature: fbData.temperature !== undefined ? fbData.temperature : prev.temperature,
             humidity: currentHumidity,
             pressure: currentPressure,
-            altitude: newAltitude || prev.altitude,
+            altitude: newAltitude,
             isRainDetected: isRaining,
             pressureTrend: currentPressure > prev.pressure ? 'rising' : (currentPressure < prev.pressure ? 'falling' : 'stable'),
             rainLikelihood: fbData.rainChance !== undefined ? fbData.rainChance : calculatedRainChance,
