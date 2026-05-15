@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   CloudRain, 
@@ -130,7 +130,6 @@ const Hero = ({ data, history, loading }: { data: SensorData, history: HistoryPo
   const condition = getWeatherCondition(data.temperature, data.humidity, data.isRainDetected);
   const WeatherIcon = condition.icon;
 
-  // ANOMALY 1 FIXED: Safe linear scan loops to handle large historical loads without call-stack overflow
   let highTemp = data.temperature > 0 ? data.temperature : 25.0;
   let lowTemp = data.temperature > 0 ? data.temperature : 20.0;
 
@@ -343,7 +342,6 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
       ) : history.length === 0 ? (
         <div className="h-48 w-full flex items-center justify-center text-secondary text-sm font-bold opacity-50">Waiting for historical data...</div>
       ) : (
-        /* ANOMALY 2 FIXED: Defined hard height layout box so Recharts container compiles on mobile wrappers */
         <div className="h-48 w-full" style={{ minHeight: '192px' }}>
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={history}>
@@ -356,7 +354,6 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" opacity={0.1} />
               <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }} axisLine={false} tickLine={false} minTickGap={30} />
               <YAxis hide domain={['dataMin - 1', 'dataMax + 1']} />
-              {/* ANOMALY 3 FIXED: Explicit formatter prevents runtime rendering evaluation crashes inside Recharts */}
               <Tooltip 
                 contentStyle={{ backgroundColor: '#0F172A', borderRadius: '16px', border: 'none', color: '#fff' }} 
                 formatter={(value: any) => [`${value}°C`, 'Temperature']}
@@ -558,8 +555,17 @@ export default function App() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  const addAlert = (type: Alert['type'], message: string) => {
-    const newAlert = {
+  // FIX 1: dismissAlert declared BEFORE addAlert so it's in scope when addAlert's
+  // setTimeout fires. Using useCallback so the reference is stable across renders.
+  const dismissAlert = useCallback((id: string) => {
+    setAlerts(prev => prev.filter(a => a.id !== id));
+  }, []);
+
+  // FIX 3: addAlert wrapped in useCallback with dismissAlert as dependency.
+  // This prevents a new function reference on every render, making it safe to
+  // include in useEffect dependency arrays without causing infinite re-renders.
+  const addAlert = useCallback((type: Alert['type'], message: string) => {
+    const newAlert: Alert = {
       id: Math.random().toString(36).substr(2, 9),
       type,
       message,
@@ -567,38 +573,52 @@ export default function App() {
     };
     setAlerts(prev => [newAlert, ...prev].slice(0, 3));
     setTimeout(() => dismissAlert(newAlert.id), 5000);
-  };
+  }, [dismissAlert]);
 
-  const handleRefresh = async () => {
+  // FIX 6: handleRefresh no longer calls window.location.reload().
+  // Instead it resets local loading state and lets the active Firebase listeners
+  // re-deliver fresh data naturally — preserving all React state and connections.
+  const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    addAlert('info', 'Forcing app reload...');
-    return new Promise((resolve) => {
+    addAlert('info', 'Refreshing sensor data...');
+    setIsLoading(true);
+    // Brief pause so the user sees the syncing indicator, then clear it.
+    // Firebase's onValue listeners will push fresh data on their own.
+    return new Promise<void>((resolve) => {
       setTimeout(() => {
-        window.location.reload(); 
-        resolve(undefined);
-      }, 1000);
+        setIsLoading(false);
+        setIsRefreshing(false);
+        resolve();
+      }, 1200);
     });
-  };
+  }, [addAlert]);
 
-  // ANOMALY 4 FIXED: Unified arrow mapping binding for explicit compiler scopes
-  const handleRangeChange = (newRange: TimeRange) => {
+  const handleRangeChange = useCallback((newRange: TimeRange) => {
+    // FIX 7: Clear stale history immediately when range changes so the skeleton
+    // loader shows instead of the previous range's data while Firebase responds.
+    setHistory([]);
     setHistoryRange(newRange);
-  };
+  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const dismissAlert = (id: string) => {
-    setAlerts(prev => prev.filter(a => a.id !== id));
-  };
+  // Track the previous pressure in a ref so we can calculate trend correctly
+  // without creating a closure over stale state.
+  // FIX 5: Using a ref for the previous pressure baseline prevents the first
+  // reading from always showing 'rising' (compared against the 0 initial state).
+  const prevPressureRef = useRef<number | null>(null);
 
   // --- FIREBASE LISTENER 1: LIVE DASHBOARD ---
+  // FIX 2: onValue returns the unsubscribe function directly.
+  // Returning it from useEffect (not calling it) correctly unsubscribes on cleanup,
+  // preventing memory leaks and duplicate event firings on re-renders.
   useEffect(() => {
     const weatherRef = ref(db, 'weather');
     
-    const listener = onValue(weatherRef, (snapshot) => {
+    const unsubscribe = onValue(weatherRef, (snapshot) => {
       const fbData = snapshot.val();
       setIsLoading(false); 
       
@@ -609,7 +629,7 @@ export default function App() {
           const currentHumidity = fbData.humidity !== undefined ? fbData.humidity : prev.humidity;
           
           if (isRaining && !prev.isRainDetected) {
-             setTimeout(() => addAlert('rain', 'Showers detected at local station'), 0);
+            setTimeout(() => addAlert('rain', 'Showers detected at local station'), 0);
           }
 
           let newAltitude = prev.altitude;
@@ -617,9 +637,29 @@ export default function App() {
             newAltitude = 44330 * (1 - Math.pow(currentPressure / 1013.25, 0.1903));
           }
 
+          // FIX 4: rainChance calculation is now cleanly separated from the
+          // fallback logic. The server value takes priority; the local estimate
+          // only runs when the server omits the field entirely.
+          const serverRainChance = fbData.rainChance;
           let calculatedRainChance = 0;
-          if (currentHumidity > 60) {
-            calculatedRainChance = Math.min(100, Math.floor((currentHumidity - 60) * 2.5));
+          if (serverRainChance === undefined) {
+            if (currentHumidity > 60) {
+              calculatedRainChance = Math.min(100, Math.floor((currentHumidity - 60) * 2.5));
+            }
+          }
+          const rainLikelihood = serverRainChance !== undefined ? serverRainChance : calculatedRainChance;
+
+          // FIX 5: Only compute trend once we have a valid prior reading.
+          // prevPressureRef starts as null and is only set after the first real
+          // pressure arrives, so the first reading always shows 'stable' (not
+          // a bogus 'rising' compared to the 0 initial state).
+          let pressureTrend: SensorData['pressureTrend'] = 'stable';
+          if (prevPressureRef.current !== null && currentPressure > 0) {
+            if (currentPressure > prevPressureRef.current) pressureTrend = 'rising';
+            else if (currentPressure < prevPressureRef.current) pressureTrend = 'falling';
+          }
+          if (currentPressure > 0) {
+            prevPressureRef.current = currentPressure;
           }
 
           const newWifi = fbData.wifi !== undefined ? fbData.wifi : prev.wifiSignal;
@@ -631,8 +671,8 @@ export default function App() {
             pressure: currentPressure,
             altitude: newAltitude,
             isRainDetected: isRaining,
-            pressureTrend: currentPressure > prev.pressure ? 'rising' : (currentPressure < prev.pressure ? 'falling' : 'stable'),
-            rainLikelihood: fbData.rainChance !== undefined ? fbData.rainChance : calculatedRainChance,
+            pressureTrend,
+            rainLikelihood,
             wifiSignal: newWifi,
             lastUpdated: new Date().toLocaleTimeString()
           };
@@ -640,10 +680,12 @@ export default function App() {
       }
     });
 
-    return () => listener();
-  }, []);
+    // FIX 2: return the function reference, don't call it
+    return unsubscribe;
+  }, [addAlert]);
 
   // --- FIREBASE LISTENER 2: REAL HISTORY GRAPHS ---
+  // FIX 2 (same pattern): return unsubscribe reference directly.
   useEffect(() => {
     let amountToPull = 24; 
     if (historyRange === '1w') amountToPull = 168; 
@@ -651,7 +693,7 @@ export default function App() {
 
     const historyQuery = query(ref(db, 'history'), limitToLast(amountToPull));
     
-    const listener = onValue(historyQuery, (snapshot) => {
+    const unsubscribe = onValue(historyQuery, (snapshot) => {
       const newHistoryData: HistoryPoint[] = [];
       
       snapshot.forEach((childSnapshot) => {
@@ -668,7 +710,8 @@ export default function App() {
       setHistory(newHistoryData);
     });
 
-    return () => listener();
+    // FIX 2: return the function reference, don't call it
+    return unsubscribe;
   }, [historyRange]);
 
   return (
