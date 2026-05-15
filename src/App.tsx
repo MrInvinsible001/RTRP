@@ -21,7 +21,11 @@ import {
   Shield,
   Wifi,
   Settings,
-  ChevronRight
+  ChevronRight,
+  Sun,
+  CloudSun,
+  Cloud,
+  Snowflake
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -111,76 +115,88 @@ const Header = ({ time, signal, onRefresh, refreshing }: { time: Date, signal: n
   </header>
 );
 
-const Hero = ({ data, loading }: { data: SensorData, loading: boolean }) => (
-  <motion.section 
-    initial={{ opacity: 0, y: 10 }}
-    animate={{ opacity: 1, y: 0 }}
-    className="px-6 py-4"
-  >
-    <div className="card-base p-8 relative overflow-hidden flex flex-col items-center text-center">
-      {loading ? (
-        <div className="w-full flex flex-col items-center">
-          <div className="w-16 h-16 skeleton rounded-full mb-6" />
-          <div className="h-12 w-32 skeleton mb-4" />
-          <div className="h-4 w-48 skeleton mb-8" />
-        </div>
-      ) : (
-        <>
-          <div className={`absolute -top-24 -right-24 w-64 h-64 blur-[80px] rounded-full opacity-30 bg-blue-500`} />
-          
-          <div className="relative z-10 w-full">
-            <div className="flex justify-between items-center w-full mb-8">
-               <div className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-secondary border border-slate-200/50 dark:border-slate-700/50">
-                  LIVE SENSOR DATA
-               </div>
-               <div className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-secondary border border-slate-200/50 dark:border-slate-700/50">
-                  ALTITUDE: {Math.floor(data.altitude)}m
-               </div>
-            </div>
+// --- The Smart Weather Brain ---
+const getWeatherCondition = (temp: number, hum: number, isRain: boolean) => {
+  if (isRain) return { icon: CloudRain, color: "text-blue-500", text: "Precipitation Detected" };
+  if (temp < 15) return { icon: Snowflake, color: "text-cyan-400", text: "Chilly Environment" };
+  if (temp >= 30 && hum < 50) return { icon: Sun, color: "text-orange-500", text: "Hot & Dry" };
+  if (temp >= 30 && hum >= 50) return { icon: CloudSun, color: "text-amber-500", text: "Warm & Humid" };
+  if (hum >= 70) return { icon: Cloud, color: "text-slate-400", text: "High Humidity" };
+  return { icon: Sun, color: "text-amber-400", text: "Optimal Environment" };
+};
 
-            <motion.div 
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.1 }}
-              className="mb-4"
-            >
-              {data.isRainDetected ? (
-                <CloudRain size={64} className="text-blue-500 mx-auto" />
-              ) : (
-                <Droplets size={64} className="text-blue-400 mx-auto" />
-              )}
-            </motion.div>
-            
-            <div className="flex items-start justify-center gap-1 ml-4 mb-2">
-              <h2 className="text-8xl font-bold tracking-tighter text-primary">
-                {data.temperature.toFixed(1)}
-              </h2>
-              <span className="text-4xl font-light text-secondary mt-3">°C</span>
-            </div>
-            
-            <p className="text-primary font-bold text-xl mb-1 capitalize tracking-tight">
-              {data.isRainDetected ? 'Precipitation Detected' : data.temperature > 28 ? 'Warm Environment' : 'Optimal Environment'}
-            </p>
-            <p className="text-secondary text-[10px] font-bold uppercase tracking-wider mb-8 opacity-60">Status Reported by NodeMCU</p>
-            
-            <div className="flex items-center justify-center gap-6 text-secondary text-sm font-medium">
-              <div className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/30 dark:border-slate-700/30">
-                <TrendingUp size={14} className="text-orange-400" />
-                <span className="text-[10px] opacity-40 font-bold uppercase mr-1">High</span>
-                <span>{Math.floor(data.temperature + 2)}.0°</span>
-              </div>
-              <div className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/30 dark:border-slate-700/30">
-                <TrendingDown size={14} className="text-blue-400" />
-                <span className="text-[10px] opacity-40 font-bold uppercase mr-1">Low</span>
-                <span>{Math.floor(data.temperature - 3)}.0°</span>
-              </div>
-            </div>
+const Hero = ({ data, loading }: { data: SensorData, loading: boolean }) => {
+  // Run the data through our new brain
+  const condition = getWeatherCondition(data.temperature, data.humidity, data.isRainDetected);
+  const WeatherIcon = condition.icon;
+
+  return (
+    <motion.section 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="px-6 py-4"
+    >
+      <div className="card-base p-8 relative overflow-hidden flex flex-col items-center text-center">
+        {loading ? (
+          <div className="w-full flex flex-col items-center">
+            <div className="w-16 h-16 skeleton rounded-full mb-6" />
+            <div className="h-12 w-32 skeleton mb-4" />
+            <div className="h-4 w-48 skeleton mb-8" />
           </div>
-        </>
-      )}
-    </div>
-  </motion.section>
-);
+        ) : (
+          <>
+            <div className={`absolute -top-24 -right-24 w-64 h-64 blur-[80px] rounded-full opacity-30 ${condition.color.replace('text-', 'bg-')}`} />
+            
+            <div className="relative z-10 w-full">
+              <div className="flex justify-between items-center w-full mb-8">
+                 <div className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-secondary border border-slate-200/50 dark:border-slate-700/50">
+                    LIVE SENSOR DATA
+                 </div>
+                 <div className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-secondary border border-slate-200/50 dark:border-slate-700/50">
+                    ALTITUDE: {Math.floor(data.altitude)}m
+                 </div>
+              </div>
+
+              <motion.div 
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: 0.1 }}
+                className="mb-4"
+              >
+                <WeatherIcon size={64} className={`${condition.color} mx-auto`} />
+              </motion.div>
+              
+              <div className="flex items-start justify-center gap-1 ml-4 mb-2">
+                <h2 className="text-8xl font-bold tracking-tighter text-primary">
+                  {data.temperature.toFixed(1)}
+                </h2>
+                <span className="text-4xl font-light text-secondary mt-3">°C</span>
+              </div>
+              
+              <p className="text-primary font-bold text-xl mb-1 capitalize tracking-tight">
+                {condition.text}
+              </p>
+              <p className="text-secondary text-[10px] font-bold uppercase tracking-wider mb-8 opacity-60">Status Reported by NodeMCU</p>
+              
+              <div className="flex items-center justify-center gap-6 text-secondary text-sm font-medium">
+                <div className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/30 dark:border-slate-700/30">
+                  <TrendingUp size={14} className="text-orange-400" />
+                  <span className="text-[10px] opacity-40 font-bold uppercase mr-1">High</span>
+                  <span>{Math.floor(data.temperature + 2)}.0°</span>
+                </div>
+                <div className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/30 dark:border-slate-700/30">
+                  <TrendingDown size={14} className="text-blue-400" />
+                  <span className="text-[10px] opacity-40 font-bold uppercase mr-1">Low</span>
+                  <span>{Math.floor(data.temperature - 3)}.0°</span>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </motion.section>
+  );
+};
 
 const StatCard = ({ icon: Icon, label, sensor, value, unit, colorClass, trend, loading }: { icon: any, label: string, sensor: string, value: string | number, unit: string, colorClass: string, trend?: 'up' | 'down' | 'stable', loading: boolean }) => (
   <div className="card-base p-5 flex flex-col gap-3 group active:scale-95 transition-all">
@@ -568,7 +584,7 @@ export default function App() {
     
     const listener = onValue(weatherRef, (snapshot) => {
       const fbData = snapshot.val();
-      setIsLoading(false); // Stop loading screen once connected
+      setIsLoading(false); 
       
       if (fbData) {
         setData(prev => {
