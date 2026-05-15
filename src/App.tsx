@@ -43,23 +43,21 @@ import PullToRefresh from 'react-simple-pull-to-refresh';
 // --- Types ---
 
 interface SensorData {
-  temperature: number; // DHT22
-  humidity: number;    // DHT22
-  pressure: number;    // BMP180
-  altitude: number;    // Calculated from BMP180
-  isRainDetected: boolean; // HW-61
+  temperature: number;
+  humidity: number;    
+  pressure: number;    
+  altitude: number;    
+  isRainDetected: boolean; 
   lastUpdated: string;
   pressureTrend: 'rising' | 'falling' | 'stable';
-  rainLikelihood: number; // Calculated
-  wifiSignal: number;  // ESP8266 RSSI
+  rainLikelihood: number; 
+  wifiSignal: number;  
 }
 
 interface HistoryPoint {
   time: string;
   temp: number;
   hum: number;
-  press: number;
-  rain: number;
 }
 
 type TimeRange = '24h' | '1w' | '1m';
@@ -551,6 +549,10 @@ export default function App() {
     });
   };
 
+  const handleRangeChange = (newRange: TimeRange) => {
+    setHistoryRange(newRange);
+  };
+
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -597,12 +599,10 @@ export default function App() {
 
   // --- FIREBASE LISTENER 2: REAL HISTORY GRAPHS ---
   useEffect(() => {
-    // We adjust how much data to pull based on the buttons clicked (24h, 1w, 1m)
     let amountToPull = 24; 
-    if (historyRange === '1w') amountToPull = 168; // 24 * 7
-    if (historyRange === '1m') amountToPull = 720; // 24 * 30
+    if (historyRange === '1w') amountToPull = 168; 
+    if (historyRange === '1m') amountToPull = 720; 
 
-    // Look at the /history folder, and only grab the latest entries
     const historyQuery = query(ref(db, 'history'), limitToLast(amountToPull));
     
     const listener = onValue(historyQuery, (snapshot) => {
@@ -610,13 +610,13 @@ export default function App() {
       
       snapshot.forEach((childSnapshot) => {
         const item = childSnapshot.val();
-        newHistoryData.push({
-          time: item.time || "00:00", // Needs time string from ESP
-          temp: item.temperature || 0,
-          hum: item.humidity || 0,
-          press: item.pressure || 0,
-          rain: item.rain === "RAINING" ? 5 : 0 // Draw a spike on the graph if raining
-        });
+        if (item) {
+          newHistoryData.push({
+            time: item.time || "00:00",
+            temp: item.temperature || 0,
+            hum: item.humidity || 0
+          });
+        }
       });
       
       setHistory(newHistoryData);
@@ -692,7 +692,7 @@ export default function App() {
                     history={history} 
                     loading={isLoading} 
                     range={historyRange} 
-                    onRangeChange={setHistoryRange} 
+                    onRangeChange={handleRangeChange} 
                   />
                 </motion.div>
               )}
