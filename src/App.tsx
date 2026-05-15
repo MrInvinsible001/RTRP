@@ -18,14 +18,13 @@ import {
   Zap,
   Info,
   Radio,
-  Shield,
   Wifi,
   Settings,
-  ChevronRight,
   Sun,
   CloudSun,
   Cloud,
-  Snowflake
+  Snowflake,
+  Monitor
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -115,7 +114,6 @@ const Header = ({ time, signal, onRefresh, refreshing }: { time: Date, signal: n
   </header>
 );
 
-// --- The Smart Weather Brain ---
 const getWeatherCondition = (temp: number, hum: number, isRain: boolean) => {
   if (isRain) return { icon: CloudRain, color: "text-blue-500", text: "Precipitation Detected" };
   if (temp < 15) return { icon: Snowflake, color: "text-cyan-400", text: "Chilly Environment" };
@@ -126,7 +124,6 @@ const getWeatherCondition = (temp: number, hum: number, isRain: boolean) => {
 };
 
 const Hero = ({ data, loading }: { data: SensorData, loading: boolean }) => {
-  // Run the data through our new brain
   const condition = getWeatherCondition(data.temperature, data.humidity, data.isRainDetected);
   const WeatherIcon = condition.icon;
 
@@ -439,7 +436,7 @@ const BottomNav = ({ active, onChange }: { active: string, onChange: (id: any) =
   </nav>
 );
 
-const SystemView = ({ data, onSimulateRain }: { data: SensorData, onSimulateRain: () => void }) => (
+const SystemView = ({ data }: { data: SensorData }) => (
   <motion.div 
     initial={{ opacity: 0, y: 10 }}
     animate={{ opacity: 1, y: 0 }}
@@ -454,28 +451,6 @@ const SystemView = ({ data, onSimulateRain }: { data: SensorData, onSimulateRain
     </div>
     
     <div className="card-base p-6 flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-2xl bg-orange-500/10 text-orange-500 shadow-sm border border-orange-500/10">
-            <Zap size={20} />
-          </div>
-          <div>
-            <p className="text-primary font-bold">Rain Simulation</p>
-            <p className="text-secondary text-xs font-medium opacity-70">Force HW-61 HIGH state</p>
-          </div>
-        </div>
-        <button 
-          onClick={onSimulateRain}
-          className={`px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all active:scale-95 ${
-            data.isRainDetected ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20' : 'bg-slate-100 dark:bg-slate-800 text-primary'
-          }`}
-        >
-          {data.isRainDetected ? 'RAIN: HIGH' : 'TRIGGER RAIN'}
-        </button>
-      </div>
-
-      <div className="h-px bg-slate-200/50 dark:bg-slate-700/50" />
-
       <div className="flex items-center justify-between group">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl bg-blue-500/10 text-blue-500 shadow-sm border border-blue-500/10">
@@ -499,7 +474,7 @@ const SystemView = ({ data, onSimulateRain }: { data: SensorData, onSimulateRain
         </div>
         <div>
           <p className="text-primary font-bold">Sensor Hub Status</p>
-          <p className="text-secondary text-xs font-medium opacity-70">Polling 3 active sensor buses</p>
+          <p className="text-secondary text-xs font-medium opacity-70">Polling 4 active components</p>
         </div>
       </div>
       
@@ -514,6 +489,13 @@ const SystemView = ({ data, onSimulateRain }: { data: SensorData, onSimulateRain
          </div>
          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 flex justify-between items-center">
             <span className="text-[10px] font-bold text-secondary">HW-61</span>
+            <span className="text-[10px] font-bold text-emerald-500">READY</span>
+         </div>
+         <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 flex justify-between items-center">
+            <div className="flex items-center gap-1">
+              <Monitor size={12} className="text-secondary" />
+              <span className="text-[10px] font-bold text-secondary">LCD 16x2</span>
+            </div>
             <span className="text-[10px] font-bold text-emerald-500">READY</span>
          </div>
       </div>
@@ -531,12 +513,12 @@ export default function App() {
     temperature: 0,
     humidity: 0,
     pressure: 0,
-    altitude: 124,
+    altitude: 0,
     isRainDetected: false,
     lastUpdated: new Date().toLocaleTimeString(),
     pressureTrend: 'stable',
-    rainLikelihood: 12,
-    wifiSignal: -65
+    rainLikelihood: 0, 
+    wifiSignal: 0      
   });
 
   const [history, setHistory] = useState<HistoryPoint[]>([]);
@@ -590,20 +572,32 @@ export default function App() {
         setData(prev => {
           const isRaining = fbData.rain === "RAINING";
           const currentPressure = fbData.pressure !== undefined ? fbData.pressure : prev.pressure;
+          const currentHumidity = fbData.humidity !== undefined ? fbData.humidity : prev.humidity;
           
           if (isRaining && !prev.isRainDetected) {
              setTimeout(() => addAlert('rain', 'Showers detected at local station'), 0);
           }
           const newAltitude = 44330 * (1 - Math.pow(currentPressure / 1013.25, 0.1903));
 
+          // Real math to eliminate the Rain Chance "dummy" value
+          let calculatedRainChance = 0;
+          if (currentHumidity > 60) {
+            calculatedRainChance = Math.min(100, Math.floor((currentHumidity - 60) * 2.5));
+          }
+
+          // Checks if ESP sends a wifi signal, otherwise keeps previous
+          const newWifi = fbData.wifi !== undefined ? fbData.wifi : prev.wifiSignal;
+
           return {
             ...prev,
             temperature: fbData.temperature !== undefined ? fbData.temperature : prev.temperature,
-            humidity: fbData.humidity !== undefined ? fbData.humidity : prev.humidity,
+            humidity: currentHumidity,
             pressure: currentPressure,
             altitude: newAltitude || prev.altitude,
             isRainDetected: isRaining,
             pressureTrend: currentPressure > prev.pressure ? 'rising' : (currentPressure < prev.pressure ? 'falling' : 'stable'),
+            rainLikelihood: fbData.rainChance !== undefined ? fbData.rainChance : calculatedRainChance,
+            wifiSignal: newWifi,
             lastUpdated: new Date().toLocaleTimeString()
           };
         });
@@ -641,18 +635,6 @@ export default function App() {
     return () => listener();
   }, [historyRange]);
 
-  const toggleRain = () => {
-    setData(prev => {
-      const newState = !prev.isRainDetected;
-      if (newState) {
-        addAlert('rain', 'Showers detected at local station');
-      } else {
-        addAlert('info', 'Weather normalization in progress');
-      }
-      return { ...prev, isRainDetected: newState };
-    });
-  };
-
   return (
     <div className="min-h-screen bg-app pb-28 text-primary selection:bg-blue-500/30">
       <Alerts alerts={alerts} onDismiss={dismissAlert} />
@@ -678,21 +660,6 @@ export default function App() {
                 >
                   <Hero data={data} loading={isLoading} />
                   <InfoGrid data={data} loading={isLoading} />
-                  
-                  <div className="px-6 py-4">
-                    <div className="card-base p-6 bg-blue-500/5 border-blue-500/10 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className="p-3 bg-blue-500 rounded-2xl text-white shadow-lg shadow-blue-500/20">
-                          <Shield size={20} />
-                        </div>
-                        <div>
-                          <p className="text-primary font-bold">Safe Environment</p>
-                          <p className="text-secondary text-xs font-medium">No weather hazards detected</p>
-                        </div>
-                      </div>
-                      <ChevronRight size={18} className="text-secondary opacity-30" />
-                    </div>
-                  </div>
                 </motion.div>
               )}
 
@@ -714,7 +681,7 @@ export default function App() {
               )}
 
               {activeTab === 'system' && (
-                <SystemView data={data} onSimulateRain={toggleRain} />
+                <SystemView data={data} />
               )}
             </AnimatePresence>
           </div>
