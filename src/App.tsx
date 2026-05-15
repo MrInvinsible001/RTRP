@@ -3,14 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, ReactNode } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   CloudRain, 
   Droplets, 
-  Thermometer, 
-  Sun, 
-  Moon, 
   Gauge, 
   AlertTriangle,
   Activity,
@@ -37,7 +34,7 @@ import {
 } from 'recharts';
 
 // --- FIREBASE IMPORTS ---
-import { ref, onValue } from 'firebase/database';
+import { ref, onValue, query, limitToLast } from 'firebase/database';
 import { db } from './firebase'; 
 
 // --- PULL TO REFRESH IMPORT ---
@@ -51,8 +48,6 @@ interface SensorData {
   pressure: number;    // BMP180
   altitude: number;    // Calculated from BMP180
   isRainDetected: boolean; // HW-61
-  lightLevel: number;  // LDR (0-1023)
-  isDaylight: boolean; // Derived from LDR
   lastUpdated: string;
   pressureTrend: 'rising' | 'falling' | 'stable';
   rainLikelihood: number; // Calculated
@@ -130,20 +125,15 @@ const Hero = ({ data, loading }: { data: SensorData, loading: boolean }) => (
           <div className="w-16 h-16 skeleton rounded-full mb-6" />
           <div className="h-12 w-32 skeleton mb-4" />
           <div className="h-4 w-48 skeleton mb-8" />
-          <div className="flex gap-4">
-             <div className="h-4 w-20 skeleton" />
-             <div className="h-4 w-20 skeleton" />
-          </div>
         </div>
       ) : (
         <>
-          <div className={`absolute -top-24 -right-24 w-64 h-64 blur-[80px] rounded-full opacity-30 ${data.isDaylight ? 'bg-amber-400' : 'bg-indigo-500'}`} />
+          <div className={`absolute -top-24 -right-24 w-64 h-64 blur-[80px] rounded-full opacity-30 bg-blue-500`} />
           
           <div className="relative z-10 w-full">
             <div className="flex justify-between items-center w-full mb-8">
-               <div className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-secondary flex items-center gap-1.5 border border-slate-200/50 dark:border-slate-700/50">
-                  <Sun size={12} className={data.isDaylight ? "text-amber-500" : "text-slate-400"} />
-                  {data.isDaylight ? 'DAYLIGHT' : 'NIGHT'} · LDR Sensor
+               <div className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-secondary border border-slate-200/50 dark:border-slate-700/50">
+                  LIVE SENSOR DATA
                </div>
                <div className="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-secondary border border-slate-200/50 dark:border-slate-700/50">
                   ALTITUDE: {Math.floor(data.altitude)}m
@@ -158,10 +148,8 @@ const Hero = ({ data, loading }: { data: SensorData, loading: boolean }) => (
             >
               {data.isRainDetected ? (
                 <CloudRain size={64} className="text-blue-500 mx-auto" />
-              ) : data.isDaylight ? (
-                <Sun size={64} className="text-amber-400 mx-auto" />
               ) : (
-                <Moon size={64} className="text-slate-400 mx-auto" />
+                <Droplets size={64} className="text-blue-400 mx-auto" />
               )}
             </motion.div>
             
@@ -173,9 +161,9 @@ const Hero = ({ data, loading }: { data: SensorData, loading: boolean }) => (
             </div>
             
             <p className="text-primary font-bold text-xl mb-1 capitalize tracking-tight">
-              {data.isRainDetected ? 'Precipitation Detected' : data.temperature > 28 ? 'Stable Room Temp' : 'Optimal Environment'}
+              {data.isRainDetected ? 'Precipitation Detected' : data.temperature > 28 ? 'Warm Environment' : 'Optimal Environment'}
             </p>
-            <p className="text-secondary text-[10px] font-bold uppercase tracking-wider mb-8 opacity-60">Status Reported by HW-61 Sensor</p>
+            <p className="text-secondary text-[10px] font-bold uppercase tracking-wider mb-8 opacity-60">Status Reported by NodeMCU</p>
             
             <div className="flex items-center justify-center gap-6 text-secondary text-sm font-medium">
               <div className="flex items-center gap-1.5 px-4 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/30 dark:border-slate-700/30">
@@ -264,12 +252,12 @@ const InfoGrid = ({ data, loading }: { data: SensorData, loading: boolean }) => 
         loading={loading}
       />
       <StatCard 
-        icon={Sun} 
-        label="Ambient Light" 
-        sensor="LDR Sensor"
-        value={data.lightLevel} 
-        unit="lux" 
-        colorClass="text-amber-500" 
+        icon={CloudRain} 
+        label="Rain Status" 
+        sensor="HW-61"
+        value={data.isRainDetected ? "YES" : "NO"} 
+        unit="" 
+        colorClass="text-indigo-500" 
         loading={loading}
       />
       <StatCard 
@@ -314,16 +302,12 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
           <p className="text-primary font-bold">Temperature History</p>
           <p className="text-secondary text-[10px] uppercase font-bold opacity-60">Degrees Celsius</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-blue-500" />
-            <span className="text-[10px] font-bold text-secondary">Avg</span>
-          </div>
-        </div>
       </div>
       
       {loading ? (
         <div className="h-48 w-full skeleton rounded-2xl" />
+      ) : history.length === 0 ? (
+        <div className="h-48 w-full flex items-center justify-center text-secondary text-sm font-bold opacity-50">Waiting for historical data...</div>
       ) : (
         <div className="h-48 w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -335,36 +319,10 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" opacity={0.1} />
-              <XAxis 
-                dataKey="time" 
-                tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }}
-                axisLine={false}
-                tickLine={false}
-                minTickGap={30}
-              />
+              <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }} axisLine={false} tickLine={false} minTickGap={30} />
               <YAxis hide domain={['dataMin - 1', 'dataMax + 1']} />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#0F172A', 
-                  borderRadius: '16px', 
-                  border: '1px solid rgba(255,255,255,0.1)', 
-                  color: '#fff',
-                  fontSize: '12px',
-                  fontWeight: 'bold',
-                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                }}
-                formatter={(value: any) => [`${value}°C`, 'Temperature']}
-                labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="temp" 
-                stroke="#3b82f6" 
-                strokeWidth={3} 
-                fillOpacity={1} 
-                fill="url(#colorTemp)" 
-                animationDuration={1500}
-              />
+              <Tooltip contentStyle={{ backgroundColor: '#0F172A', borderRadius: '16px', border: 'none', color: '#fff' }} />
+              <Area type="monotone" dataKey="temp" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorTemp)" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -378,14 +336,12 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
           <p className="text-primary font-bold">Humidity Level</p>
           <p className="text-secondary text-[10px] uppercase font-bold opacity-60">Percentage %</p>
         </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-2 h-2 rounded-full bg-emerald-500" />
-          <span className="text-[10px] font-bold text-secondary">Level</span>
-        </div>
       </div>
       
       {loading ? (
         <div className="h-40 w-full skeleton rounded-2xl" />
+      ) : history.length === 0 ? (
+        <div className="h-40 w-full flex items-center justify-center text-secondary text-sm font-bold opacity-50">Waiting for historical data...</div>
       ) : (
         <div className="h-40 w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -397,96 +353,10 @@ const ChartsSection = ({ history, loading, range, onRangeChange }: { history: Hi
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" opacity={0.1} />
-              <XAxis 
-                dataKey="time" 
-                tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }}
-                axisLine={false}
-                tickLine={false}
-                minTickGap={30}
-              />
+              <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }} axisLine={false} tickLine={false} minTickGap={30} />
               <YAxis hide domain={[0, 100]} />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#0F172A', 
-                  borderRadius: '16px', 
-                  border: '1px solid rgba(255,255,255,0.1)', 
-                  color: '#fff',
-                  fontSize: '12px',
-                  fontWeight: 'bold'
-                }}
-                formatter={(value: any) => [`${value}%`, 'Humidity']}
-                labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="hum" 
-                stroke="#10b981" 
-                strokeWidth={3} 
-                fillOpacity={1} 
-                fill="url(#colorHum)" 
-                animationDuration={1500}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </div>
-
-    {/* Rainfall Chart */}
-    <div className="card-base p-6">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <p className="text-primary font-bold">Rainfall Distribution</p>
-          <p className="text-secondary text-[10px] uppercase font-bold opacity-60">Millimeters mm</p>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-2 h-2 rounded-full bg-indigo-500" />
-          <span className="text-[10px] font-bold text-secondary">Precipitation</span>
-        </div>
-      </div>
-      
-      {loading ? (
-        <div className="h-40 w-full skeleton rounded-2xl" />
-      ) : (
-        <div className="h-40 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={history}>
-              <defs>
-                <linearGradient id="colorRain" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2}/>
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#94a3b8" opacity={0.1} />
-              <XAxis 
-                dataKey="time" 
-                tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }}
-                axisLine={false}
-                tickLine={false}
-                minTickGap={30}
-              />
-              <YAxis hide domain={[0, 'dataMax + 5']} />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#0F172A', 
-                  borderRadius: '16px', 
-                  border: '1px solid rgba(255,255,255,0.1)', 
-                  color: '#fff',
-                  fontSize: '12px',
-                  fontWeight: 'bold'
-                }}
-                formatter={(value: any) => [`${value}mm`, 'Rainfall']}
-                labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="rain" 
-                stroke="#6366f1" 
-                strokeWidth={3} 
-                fillOpacity={1} 
-                fill="url(#colorRain)" 
-                animationDuration={1500}
-              />
+              <Tooltip contentStyle={{ backgroundColor: '#0F172A', borderRadius: '16px', border: 'none', color: '#fff' }} />
+              <Area type="monotone" dataKey="hum" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorHum)" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -615,7 +485,7 @@ const SystemView = ({ data, onSimulateRain }: { data: SensorData, onSimulateRain
         </div>
         <div>
           <p className="text-primary font-bold">Sensor Hub Status</p>
-          <p className="text-secondary text-xs font-medium opacity-70">Polling 4 active sensor buses</p>
+          <p className="text-secondary text-xs font-medium opacity-70">Polling 3 active sensor buses</p>
         </div>
       </div>
       
@@ -629,18 +499,10 @@ const SystemView = ({ data, onSimulateRain }: { data: SensorData, onSimulateRain
             <span className="text-[10px] font-bold text-emerald-500">READY</span>
          </div>
          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 flex justify-between items-center">
-            <span className="text-[10px] font-bold text-secondary">LDR</span>
-            <span className="text-[10px] font-bold text-emerald-500">READY</span>
-         </div>
-         <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 flex justify-between items-center">
             <span className="text-[10px] font-bold text-secondary">HW-61</span>
             <span className="text-[10px] font-bold text-emerald-500">READY</span>
          </div>
       </div>
-    </div>
-
-    <div className="mt-8 text-center">
-      <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-secondary opacity-30">Serial Console: Listening on COM3</p>
     </div>
   </motion.div>
 );
@@ -657,8 +519,6 @@ export default function App() {
     pressure: 0,
     altitude: 124,
     isRainDetected: false,
-    lightLevel: 840,
-    isDaylight: true,
     lastUpdated: new Date().toLocaleTimeString(),
     pressureTrend: 'stable',
     rainLikelihood: 12,
@@ -668,65 +528,6 @@ export default function App() {
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
-
-  // Data Generation Helper (Keeping this for the fake history graphs until your hardware sends lists)
-  const generateHistoricalData = (range: TimeRange): HistoryPoint[] => {
-    let points = 0;
-    let increment = 1; 
-    let formatOptions: Intl.DateTimeFormatOptions = {};
-
-    if (range === '24h') {
-      points = 24;
-      increment = 1;
-      formatOptions = { hour: '2-digit', minute: '2-digit' };
-    } else if (range === '1w') {
-      points = 7;
-      increment = 24;
-      formatOptions = { weekday: 'short', month: 'short', day: 'numeric' };
-    } else if (range === '1m') {
-      points = 30;
-      increment = 24;
-      formatOptions = { month: 'short', day: 'numeric' };
-    }
-
-    const data: HistoryPoint[] = [];
-    const now = new Date();
-
-    for (let i = points - 1; i >= 0; i--) {
-      const d = new Date(now.getTime() - i * increment * 60 * 60 * 1000);
-      const timeStr = range === '24h' 
-        ? d.toLocaleTimeString([], formatOptions)
-        : d.toLocaleDateString([], formatOptions);
-        
-      data.push({
-        time: timeStr,
-        temp: parseFloat((20 + Math.random() * 8 + (Math.sin(i / 2) * 4)).toFixed(1)),
-        hum: Math.floor(40 + Math.random() * 40 + (Math.cos(i / 4) * 10)),
-        press: Math.floor(1005 + Math.random() * 15),
-        rain: parseFloat((Math.random() > 0.7 ? Math.random() * 10 : 0).toFixed(1))
-      });
-    }
-    return data;
-  };
-
-  // Initial Load Setting
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-      setHistory(generateHistoricalData('24h'));
-    }, 1200);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Handle Range Change
-  const handleRangeChange = (newRange: TimeRange) => {
-    setHistoryRange(newRange);
-    setIsLoading(true);
-    setTimeout(() => {
-      setHistory(generateHistoricalData(newRange));
-      setIsLoading(false);
-    }, 600);
-  };
 
   const addAlert = (type: Alert['type'], message: string) => {
     const newAlert = {
@@ -739,12 +540,9 @@ export default function App() {
     setTimeout(() => dismissAlert(newAlert.id), 5000);
   };
 
-  // NEW: Handle Pull-to-Refresh / Hard Reload
   const handleRefresh = async () => {
     setIsRefreshing(true);
     addAlert('info', 'Forcing app reload...');
-    
-    // Wait 1 second for the animation, then force the browser to reload the page
     return new Promise((resolve) => {
       setTimeout(() => {
         window.location.reload(); 
@@ -753,7 +551,6 @@ export default function App() {
     });
   };
 
-  // Clock
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -763,24 +560,22 @@ export default function App() {
     setAlerts(prev => prev.filter(a => a.id !== id));
   };
 
-  // --- REAL FIREBASE LISTENER LOGIC ---
+  // --- FIREBASE LISTENER 1: LIVE DASHBOARD ---
   useEffect(() => {
     const weatherRef = ref(db, 'weather');
     
     const listener = onValue(weatherRef, (snapshot) => {
       const fbData = snapshot.val();
+      setIsLoading(false); // Stop loading screen once connected
       
       if (fbData) {
         setData(prev => {
           const isRaining = fbData.rain === "RAINING";
           const currentPressure = fbData.pressure !== undefined ? fbData.pressure : prev.pressure;
           
-          // Trigger the UI alert if it starts raining
           if (isRaining && !prev.isRainDetected) {
              setTimeout(() => addAlert('rain', 'Showers detected at local station'), 0);
           }
-
-          // Calculate altitude based on new pressure (Standard formula estimation)
           const newAltitude = 44330 * (1 - Math.pow(currentPressure / 1013.25, 0.1903));
 
           return {
@@ -799,6 +594,36 @@ export default function App() {
 
     return () => listener();
   }, []);
+
+  // --- FIREBASE LISTENER 2: REAL HISTORY GRAPHS ---
+  useEffect(() => {
+    // We adjust how much data to pull based on the buttons clicked (24h, 1w, 1m)
+    let amountToPull = 24; 
+    if (historyRange === '1w') amountToPull = 168; // 24 * 7
+    if (historyRange === '1m') amountToPull = 720; // 24 * 30
+
+    // Look at the /history folder, and only grab the latest entries
+    const historyQuery = query(ref(db, 'history'), limitToLast(amountToPull));
+    
+    const listener = onValue(historyQuery, (snapshot) => {
+      const newHistoryData: HistoryPoint[] = [];
+      
+      snapshot.forEach((childSnapshot) => {
+        const item = childSnapshot.val();
+        newHistoryData.push({
+          time: item.time || "00:00", // Needs time string from ESP
+          temp: item.temperature || 0,
+          hum: item.humidity || 0,
+          press: item.pressure || 0,
+          rain: item.rain === "RAINING" ? 5 : 0 // Draw a spike on the graph if raining
+        });
+      });
+      
+      setHistory(newHistoryData);
+    });
+
+    return () => listener();
+  }, [historyRange]);
 
   const toggleRain = () => {
     setData(prev => {
@@ -867,7 +692,7 @@ export default function App() {
                     history={history} 
                     loading={isLoading} 
                     range={historyRange} 
-                    onRangeChange={handleRangeChange} 
+                    onRangeChange={setHistoryRange} 
                   />
                 </motion.div>
               )}
