@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useMemo, ReactNode } from 'react';
+import { useState, useEffect, ReactNode } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   CloudRain, 
@@ -12,12 +12,9 @@ import {
   Sun, 
   Moon, 
   Gauge, 
-  RefreshCw,
   AlertTriangle,
-  CheckCircle2,
   Activity,
-  Calendar,
-  Clock,
+  History,
   TrendingDown,
   TrendingUp,
   Cpu,
@@ -25,21 +22,9 @@ import {
   Info,
   Radio,
   Shield,
-  Volume2,
-  VolumeX,
-  Maximize2,
-  Minimize2,
-  History,
-  Layers,
   Wifi,
   Settings,
-  Bell,
-  Navigation,
-  Box,
-  Compass,
-  MapPin,
-  ChevronRight,
-  Wind
+  ChevronRight
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -54,6 +39,8 @@ import {
 // --- FIREBASE IMPORTS ---
 import { ref, onValue } from 'firebase/database';
 import { db } from './firebase'; 
+
+// --- PULL TO REFRESH IMPORT ---
 import PullToRefresh from 'react-simple-pull-to-refresh';
 
 // --- Types ---
@@ -741,21 +728,6 @@ export default function App() {
     }, 600);
   };
 
-  // Handle Refresh
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    setTimeout(() => {
-      setIsRefreshing(false);
-      addAlert('success', 'Weather data synchronized');
-    }, 1500);
-  };
-
-  // Clock
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   const addAlert = (type: Alert['type'], message: string) => {
     const newAlert = {
       id: Math.random().toString(36).substr(2, 9),
@@ -766,6 +738,26 @@ export default function App() {
     setAlerts(prev => [newAlert, ...prev].slice(0, 3));
     setTimeout(() => dismissAlert(newAlert.id), 5000);
   };
+
+  // NEW: Handle Pull-to-Refresh / Hard Reload
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    addAlert('info', 'Forcing app reload...');
+    
+    // Wait 1 second for the animation, then force the browser to reload the page
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        window.location.reload(); 
+        resolve(undefined);
+      }, 1000);
+    });
+  };
+
+  // Clock
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const dismissAlert = (id: string) => {
     setAlerts(prev => prev.filter(a => a.id !== id));
@@ -831,57 +823,61 @@ export default function App() {
         refreshing={isRefreshing}
       />
       
-      <main className="max-w-2xl mx-auto">
-        <AnimatePresence mode="wait">
-          {activeTab === 'dashboard' && (
-            <motion.div 
-              key="dash"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.02 }}
-              transition={{ duration: 0.3 }}
-            >
-              <Hero data={data} loading={isLoading} />
-              <InfoGrid data={data} loading={isLoading} />
-              
-              <div className="px-6 py-4">
-                <div className="card-base p-6 bg-blue-500/5 border-blue-500/10 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 bg-blue-500 rounded-2xl text-white shadow-lg shadow-blue-500/20">
-                      <Shield size={20} />
-                    </div>
-                    <div>
-                      <p className="text-primary font-bold">Safe Environment</p>
-                      <p className="text-secondary text-xs font-medium">No weather hazards detected</p>
+      <main className="max-w-2xl mx-auto h-full">
+        <PullToRefresh onRefresh={handleRefresh} pullingContent={''} maxPullDownDistance={100}>
+          <div className="min-h-[calc(100vh-200px)]">
+            <AnimatePresence mode="wait">
+              {activeTab === 'dashboard' && (
+                <motion.div 
+                  key="dash"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.02 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <Hero data={data} loading={isLoading} />
+                  <InfoGrid data={data} loading={isLoading} />
+                  
+                  <div className="px-6 py-4">
+                    <div className="card-base p-6 bg-blue-500/5 border-blue-500/10 flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="p-3 bg-blue-500 rounded-2xl text-white shadow-lg shadow-blue-500/20">
+                          <Shield size={20} />
+                        </div>
+                        <div>
+                          <p className="text-primary font-bold">Safe Environment</p>
+                          <p className="text-secondary text-xs font-medium">No weather hazards detected</p>
+                        </div>
+                      </div>
+                      <ChevronRight size={18} className="text-secondary opacity-30" />
                     </div>
                   </div>
-                  <ChevronRight size={18} className="text-secondary opacity-30" />
-                </div>
-              </div>
-            </motion.div>
-          )}
+                </motion.div>
+              )}
 
-          {activeTab === 'history' && (
-            <motion.div 
-              key="hist"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.02 }}
-              transition={{ duration: 0.3 }}
-            >
-              <ChartsSection 
-                history={history} 
-                loading={isLoading} 
-                range={historyRange} 
-                onRangeChange={handleRangeChange} 
-              />
-            </motion.div>
-          )}
+              {activeTab === 'history' && (
+                <motion.div 
+                  key="hist"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.02 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <ChartsSection 
+                    history={history} 
+                    loading={isLoading} 
+                    range={historyRange} 
+                    onRangeChange={handleRangeChange} 
+                  />
+                </motion.div>
+              )}
 
-          {activeTab === 'system' && (
-            <SystemView data={data} onSimulateRain={toggleRain} />
-          )}
-        </AnimatePresence>
+              {activeTab === 'system' && (
+                <SystemView data={data} onSimulateRain={toggleRain} />
+              )}
+            </AnimatePresence>
+          </div>
+        </PullToRefresh>
       </main>
 
       <BottomNav active={activeTab} onChange={setActiveTab} />
