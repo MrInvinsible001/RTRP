@@ -390,7 +390,7 @@ export default function App() {
   useEffect(() => {
     const timer = setInterval(() => {
       setCurrentTime(new Date());
-      setIsNodeOffline(Date.now() - data.lastPacketReceived > 60000); // 15s without data = Offline
+      setIsNodeOffline(Date.now() - data.lastPacketReceived > 15000); // 15s without data = Offline
     }, 1000);
     return () => clearInterval(timer);
   }, [data.lastPacketReceived]);
